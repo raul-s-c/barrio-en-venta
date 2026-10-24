@@ -1,0 +1,52 @@
+name: Publicar el juego
+
+# Cada cambio en main se prueba y se publica en GitHub Pages. La app instalada en el
+# móvil detecta la versión nueva (version.json) y se actualiza sola.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android-game/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-game
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: android-game/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit && npx vite build
+        env:
+          BASE_PATH: /barrio-en-venta/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: android-game/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

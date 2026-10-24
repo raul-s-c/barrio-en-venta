@@ -55,7 +55,7 @@ test('dos jugadores separados comparten partida y turnos persistidos', async ({ 
     await page.getByRole('button', { name: 'Partidas y conexión', exact: true }).click();
     await page.getByLabel('Nombre', { exact: true }).fill(name);
     await page.getByLabel('Contraseña', { exact: true }).fill('prueba-123456');
-    await page.locator('form button.primary').click();
+    await page.locator('.online-advanced form button.primary').click();
     await expect(page.getByRole('button', { name: 'Crear partida privada' })).toBeVisible();
   }
   await signup(pa, `Raul${suffix}`);

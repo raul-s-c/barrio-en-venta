@@ -15,7 +15,7 @@ const crop = (index: number) =>
 export function Art({ index, className = '' }: { index: number; className?: string }) {
   return (
     <svg aria-hidden="true" className={`art ${className}`} viewBox={crop(index)} overflow="hidden">
-      <image href="/art/city-atlas-v2.png" width="1254" height="1254" />
+      <image href={`${import.meta.env.BASE_URL}art/city-atlas-v2.png`} width="1254" height="1254" />
     </svg>
   );
 }
@@ -109,7 +109,11 @@ export const Board = memo(function Board({
                       overflow="hidden"
                       viewBox={crop(p.art)}
                     >
-                      <image href="/art/city-atlas-v2.png" width="1254" height="1254" />
+                      <image
+                        href={`${import.meta.env.BASE_URL}art/city-atlas-v2.png`}
+                        width="1254"
+                        height="1254"
+                      />
                     </svg>
                   ) : (
                     <>

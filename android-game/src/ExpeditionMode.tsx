@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, FlaskConical, RotateCcw, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, FlaskConical, RotateCcw, Sparkles, ZoomIn, ZoomOut } from 'lucide-react';
 import { CLIENTS, CATEGORIES, property } from '../shared/catalog';
 import {
   applyExpeditionCommand,
@@ -40,6 +40,22 @@ export default function ExpeditionMode() {
   const [message, setMessage] = useState('');
   const [metrics, setMetrics] = useState<ReturnType<typeof simulateExpeditionBatch> | null>(null);
   const [simBusy, setSimBusy] = useState(false);
+  const [mapZoom, setMapZoom] = useState(false);
+  const mapScroll = useRef<HTMLDivElement>(null);
+  // Al ampliar, centra la vista en las casillas abiertas (o en el centro del mapa).
+  useEffect(() => {
+    const box = mapScroll.current;
+    if (!mapZoom || !box) return;
+    const open = game.tiles.filter((tile) => tile.open);
+    const q = open.length ? open.reduce((sum, t) => sum + t.q + t.r / 2, 0) / open.length : 0;
+    const r = open.length ? open.reduce((sum, t) => sum + t.r, 0) / open.length : 0;
+    const scale = box.scrollWidth / width;
+    box.scrollTo({
+      left: (width / 2 + Math.sqrt(3) * (size + 1) * q) * scale - box.clientWidth / 2,
+      top: (height / 2 + (size + 1) * 1.5 * r) * scale - box.clientHeight / 2,
+      behavior: 'smooth',
+    });
+  }, [mapZoom, game.zone]);
   const act = (command: Parameters<typeof applyExpeditionCommand>[2]) => {
     try {
       const next = applyExpeditionCommand(game, game.active, command);
@@ -205,7 +221,15 @@ export default function ExpeditionMode() {
               {game.players[1].name}
             </span>
           </div>
-          <div className="expedition-map-scroll">
+          <button
+            className="expedition-zoom icon-button"
+            aria-label={mapZoom ? 'Ver el mapa entero' : 'Ampliar el mapa'}
+            title={mapZoom ? 'Ver el mapa entero' : 'Ampliar el mapa'}
+            onClick={() => setMapZoom((z) => !z)}
+          >
+            {mapZoom ? <ZoomOut size={18} /> : <ZoomIn size={18} />}
+          </button>
+          <div className={`expedition-map-scroll ${mapZoom ? 'zoomed' : ''}`} ref={mapScroll}>
             <svg
               className="expedition-map"
               viewBox={`0 0 ${width} ${height}`}

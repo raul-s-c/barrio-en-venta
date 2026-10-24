@@ -46,6 +46,14 @@ test('modelos y colores propios, mano permanente y tamaño móvil', async ({ pag
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await page.locator('.tile-effect').scrollIntoViewIfNeeded();
+    // En vertical la mano está siempre a la vista como tira y se despliega al tocarla.
+    const strip = await page.locator('.dock-mini').boundingBox();
+    expect(strip!.y + strip!.height).toBeLessThan(844);
+    await expect(page.locator('.dock-mini .mini-chip')).toHaveCount(
+      (await page.locator('.hand-client').count()) +
+        (await page.locator('.tactic-mini-card').count()),
+    );
+    await page.getByRole('button', { name: /Mano y cartas/ }).click();
     const hand = await page.locator('.client-hand').boundingBox();
     expect(hand!.y).toBeGreaterThanOrEqual(0);
     expect(hand!.y + hand!.height).toBeLessThan(844);
@@ -63,6 +71,7 @@ test('modelos y colores propios, mano permanente y tamaño móvil', async ({ pag
         }),
       ),
     ).toBe(true);
+    await page.getByRole('button', { name: /Ocultar/ }).click();
     if (width === 390 && process.env.GAME_QA_DIR)
       await page.screenshot({ path: join(process.env.GAME_QA_DIR, 'v02-city-mobile.png') });
   }

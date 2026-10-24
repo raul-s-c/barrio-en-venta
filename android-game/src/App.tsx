@@ -28,7 +28,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { CLIENTS, CATEGORIES, SPECIALTIES, RULES_VERSION, property } from '../shared/catalog';
+import {
+  CARDS,
+  CLIENTS,
+  CATEGORIES,
+  SPECIALTIES,
+  RULES_VERSION,
+  property,
+} from '../shared/catalog';
 import {
   applyCommand,
   createGame,
@@ -48,6 +55,16 @@ import ExpeditionMode from './ExpeditionMode';
 import { Rulebook } from './Rulebook';
 import { tileTheme } from './tile-theme';
 import { AnimatedScore, TurnBanner } from './fx';
+import {
+  decodeTurn,
+  newTurnGame,
+  playCommand,
+  readTurnFromLocation,
+  receiveTurn,
+  replay,
+  type TurnGame,
+} from './turns';
+import { TurnShareBar, TurnsPanel } from './TurnsPanel';
 import {
   request,
   storage,
@@ -86,16 +103,32 @@ export default function App() {
     [name, setName] = useState(''),
     [password, setPassword] = useState(''),
     [code, setCode] = useState(''),
-    [notice, setNotice] = useState('');
+    [notice, setNotice] = useState(''),
+    [turnGames, setTurnGames] = useState<TurnGame[]>([]),
+    [turnId, setTurnId] = useState<string | null>(null),
+    [dockOpen, setDockOpen] = useState(false);
+  const turnGamesRef = useRef(turnGames);
+  turnGamesRef.current = turnGames;
   const pending = useRef<Pending | null>(null),
     lastOnline = useRef<OnlineGame | null>(null);
   lastOnline.current = online;
+  const turn = turnGames.find((g) => g.id === turnId) ?? null;
+  const turnState = useMemo(() => {
+    if (!turn) return null;
+    try {
+      return replay(turn);
+    } catch {
+      return null;
+    }
+  }, [turn]);
   const v = useMemo(
     () =>
-      online?.view.version === RULES_VERSION
-        ? online.view
-        : view(local.version === RULES_VERSION ? local : createGame(217), 0),
-    [online, local],
+      turn && turnState
+        ? view(turnState, turn.self)
+        : online?.view.version === RULES_VERSION
+          ? online.view
+          : view(local.version === RULES_VERSION ? local : createGame(217), 0),
+    [online, local, turn, turnState],
   );
   const mine = v.active === v.self && !v.finished && !online?.waiting;
   const tile = v.tiles[selected],
@@ -122,8 +155,15 @@ export default function App() {
       storage.get('session'),
       storage.get('server'),
       storage.get('online-game'),
-    ]).then(async ([saved, auth, url, gameId]) => {
+      storage.get('turn-games'),
+      storage.get('turn-open'),
+    ]).then(async ([saved, auth, url, gameId, savedTurns, openTurn]) => {
       try {
+        if (savedTurns) {
+          const list = JSON.parse(savedTurns) as TurnGame[];
+          setTurnGames(list);
+          if (openTurn && list.some((g) => g.id === openTurn)) setTurnId(openTurn);
+        }
         if (saved) {
           const s = JSON.parse(saved);
           if (s.version === RULES_VERSION) setLocal(s);
@@ -157,7 +197,59 @@ export default function App() {
       void storage.set('local-game', JSON.stringify(local));
   }, [local, boot]);
   useEffect(() => {
-    if (!boot || online || local.version !== RULES_VERSION || local.finished || local.active === 0)
+    if (!boot) return;
+    void storage.set('turn-games', JSON.stringify(turnGames));
+  }, [turnGames, boot]);
+  useEffect(() => {
+    if (!boot) return;
+    if (turnId) void storage.set('turn-open', turnId);
+    else void storage.remove('turn-open');
+  }, [turnId, boot]);
+  // Un enlace de turno abre o actualiza su partida, ya sea al arrancar o con la app abierta.
+  useEffect(() => {
+    if (!boot) return;
+    const receive = async () => {
+      const code = readTurnFromLocation();
+      if (!code) return;
+      history.replaceState(null, '', location.pathname + location.search);
+      try {
+        const payload = await decodeTurn(code);
+        const list = turnGamesRef.current;
+        const result = receiveTurn(
+          payload,
+          list.find((g) => g.id === payload.id),
+        );
+        setTurnGames([result.game, ...list.filter((g) => g.id !== result.game.id)]);
+        const game = result.game;
+        const rival = game.names[1 - game.self];
+        setTurnId(game.id);
+        setOnline(null);
+        setLobby(false);
+        setTab('partida');
+        setNotice(
+          result.kind === 'new'
+            ? `Partida por turnos con ${rival}. Ya está guardada en este móvil.`
+            : result.kind === 'updated'
+              ? `${rival} ha jugado. ${replay(game).active === game.self ? '¡Te toca!' : ''}`
+              : 'Ese enlace ya estaba aplicado: tienes la partida al día.',
+        );
+      } catch (e) {
+        setNotice((e as Error).message);
+      }
+    };
+    void receive();
+    window.addEventListener('hashchange', receive);
+    return () => window.removeEventListener('hashchange', receive);
+  }, [boot]);
+  useEffect(() => {
+    if (
+      !boot ||
+      online ||
+      turnId ||
+      local.version !== RULES_VERSION ||
+      local.finished ||
+      local.active === 0
+    )
       return;
     const timer = setTimeout(() => {
       setLocal((s) => {
@@ -170,12 +262,13 @@ export default function App() {
       });
     }, 450);
     return () => clearTimeout(timer);
-  }, [boot, online, local]);
+  }, [boot, online, local, turnId]);
   const openGame = useCallback(
     async (id: string) => {
       try {
         const game = await request<OnlineGame>(server, `/games/${id}`, session);
         setOnline(game);
+        setTurnId(null);
         setLobby(false);
         setTab('partida');
         pending.current = null;
@@ -232,6 +325,7 @@ export default function App() {
     void storage.remove('online-game');
     if (reset) setLocal(createGame(crypto.getRandomValues(new Uint32Array(1))[0]));
     setOnline(null);
+    setTurnId(null);
     setLobby(false);
     setTab('partida');
     setSelected(18);
@@ -308,8 +402,36 @@ export default function App() {
       dead = true;
     };
   }, [lobby, session, server, online?.id]);
+  function openTurnGame(id: string) {
+    void storage.remove('online-game');
+    setOnline(null);
+    setTurnId(id);
+    setLobby(false);
+    setTab('partida');
+    setSelected(18);
+  }
+  function createTurnGame(me: string, rival: string) {
+    const game = newTurnGame([me, rival]);
+    setTurnGames((list) => [game, ...list]);
+    openTurnGame(game.id);
+    setNotice(
+      game.first === game.self
+        ? `Empiezas tú. Al terminar tu turno, envía el enlace a ${rival}.`
+        : `Empieza ${rival}: envíale la invitación con el botón «Enviar a ${rival}».`,
+    );
+  }
   async function execute(command: Command, retry = false) {
     if (busy) return;
+    if (turn && turnState) {
+      try {
+        const next = playCommand(turn, turnState, command).game;
+        setTurnGames((list) => list.map((g) => (g.id === next.id ? next : g)));
+        setError('');
+      } catch (e) {
+        setError((e as Error).message);
+      }
+      return;
+    }
     if (online) {
       if (pending.current && !retry) {
         setError('Hay un envío pendiente. Reinténtalo antes de otra jugada.');
@@ -376,6 +498,7 @@ export default function App() {
         join ? { code: code.replaceAll(' ', '').trim() } : {},
       );
       setOnline(game);
+      setTurnId(null);
       setLobby(false);
       setTab('partida');
       pending.current = null;
@@ -466,9 +589,11 @@ export default function App() {
               {online ? <Globe2 size={11} /> : <Sparkles size={11} />}{' '}
               {tab === 'expedicion'
                 ? 'Campaña en este dispositivo'
-                : online
-                  ? 'Partida privada online'
-                  : 'Entrenamiento con Clara'}
+                : turn
+                  ? `Por turnos con ${turn.names[1 - turn.self]}`
+                  : online
+                    ? 'Partida privada online'
+                    : 'Entrenamiento con Clara'}
             </button>
           </div>
         </div>
@@ -528,7 +653,9 @@ export default function App() {
                 ? 'Partida terminada'
                 : mine
                   ? `Tu turno · ${v.actions} ${v.actions === 1 ? 'acción' : 'acciones'}`
-                  : `Turno de ${v.players[v.active].name}`
+                  : turn
+                    ? `Turno de ${v.players[v.active].name}: envíale el enlace`
+                    : `Turno de ${v.players[v.active].name}`
             }
             tone={v.finished ? 'neutral' : mine ? 'mine' : 'rival'}
           />
@@ -547,13 +674,14 @@ export default function App() {
                     ? 'Invitación abierta'
                     : mine
                       ? 'Tu turno'
-                      : online
+                      : online || turn
                         ? 'Turno rival'
                         : 'Clara piensa…'}
               </span>
             </div>
             <PlayerScore v={v} seat={1 - v.self} />
           </section>
+          {turn ? <TurnShareBar game={turn} v={v} onNotice={setNotice} /> : null}
           {online?.waiting ? (
             <div className="invite-banner">
               <KeyRound size={20} />
@@ -865,7 +993,28 @@ export default function App() {
               }}
             />
           )}
-          <div className="decision-dock">
+          <div className={`decision-dock ${dockOpen ? 'open' : ''}`}>
+            {/* Móvil en vertical: la mano siempre a la vista en una tira; al tocarla se despliega. */}
+            <div className="dock-mini" aria-label="Tu mano y tus cartas">
+              {v.you.clients.map((id) => (
+                <button key={`c${id}`} className="mini-chip" onClick={() => setDockOpen(true)}>
+                  {CLIENTS[id].accepts.map((cat) => (
+                    <i key={cat} className={`mini-dot cat-${cat}`} title={cat} />
+                  ))}
+                  {CLIENTS[id].name}
+                </button>
+              ))}
+              {v.you.cards.map((id) => (
+                <button
+                  key={`k${id}`}
+                  className="mini-chip mini-card"
+                  onClick={() => setDockOpen(true)}
+                >
+                  <Sparkles size={11} />
+                  {CARDS[id].name}
+                </button>
+              ))}
+            </div>
             <ClientHand
               v={v}
               selected={selected}
@@ -907,6 +1056,19 @@ export default function App() {
                   ) : null}
                 </span>
               </div>
+              <button
+                className={`dock-toggle ${v.offers.some((o) => !o.blocked) && mine ? 'has-sales' : ''}`}
+                aria-expanded={dockOpen}
+                onClick={() => setDockOpen((open) => !open)}
+              >
+                {dockOpen ? <ChevronDown size={16} /> : <Users size={16} />}
+                <span>
+                  {dockOpen ? 'Ocultar' : 'Mano y cartas'}
+                  <small>
+                    {v.you.clients.length} clientes · {v.you.cards.length} cartas
+                  </small>
+                </span>
+              </button>
               <button
                 className="primary end-turn"
                 disabled={!mine || busy || !v.choices.some((c) => c.command.type === 'end')}
@@ -982,6 +1144,16 @@ export default function App() {
                 <X />
               </button>
             </header>
+            <TurnsPanel
+              games={turnGames}
+              activeId={turnId}
+              onCreate={createTurnGame}
+              onOpen={openTurnGame}
+              onDelete={(id) => {
+                setTurnGames((list) => list.filter((g) => g.id !== id));
+                if (id === turnId) training();
+              }}
+            />
             <div className="local-start">
               <Art index={0} />
               <div>
@@ -1000,145 +1172,153 @@ export default function App() {
                 <RefreshCw size={18} />
               </button>
             </div>
-            <details className="connection" open={native && !server}>
+            <details
+              className="online-advanced"
+              open={import.meta.env.DEV || !!server || !!session}
+            >
               <summary>
-                <Settings2 size={15} />
-                Conexión al servidor
+                <Globe2 size={15} /> Online con servidor propio (avanzado)
               </summary>
-              <label>
-                URL HTTPS
-                <input
-                  type="url"
-                  placeholder="https://vuestro-servidor.example"
-                  value={server}
-                  onChange={(e) => setServer(e.target.value.trim())}
-                />
-              </label>
-              <button
-                onClick={() => {
-                  void storage.set('server', server);
-                  setNotice('Dirección guardada.');
-                }}
-              >
-                Guardar dirección <Check size={15} />
-              </button>
-              <small>
-                {!native && !server
-                  ? 'Vista web: servidor de esta misma dirección.'
-                  : 'Una misma dirección en ambos móviles.'}
-              </small>
-            </details>
-            {!session ? (
-              <form onSubmit={authenticate}>
-                <div className="segmented">
-                  <button
-                    type="button"
-                    className={authMode === 'register' ? 'selected' : ''}
-                    onClick={() => setAuthMode('register')}
-                  >
-                    Crear cuenta
-                  </button>
-                  <button
-                    type="button"
-                    className={authMode === 'login' ? 'selected' : ''}
-                    onClick={() => setAuthMode('login')}
-                  >
-                    Entrar
-                  </button>
-                </div>
+              <details className="connection" open={native && !server}>
+                <summary>
+                  <Settings2 size={15} />
+                  Conexión al servidor
+                </summary>
                 <label>
-                  Nombre
+                  URL HTTPS
                   <input
-                    autoComplete="username"
-                    required
-                    minLength={2}
-                    maxLength={24}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    type="url"
+                    placeholder="https://vuestro-servidor.example"
+                    value={server}
+                    onChange={(e) => setServer(e.target.value.trim())}
                   />
                 </label>
-                <label>
-                  Contraseña
-                  <input
-                    type="password"
-                    required
-                    minLength={8}
-                    maxLength={128}
-                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </label>
-                <button className="primary" disabled={busy}>
-                  {authMode === 'login' ? 'Entrar' : 'Crear cuenta'}
-                  <ArrowRight size={17} />
-                </button>
-              </form>
-            ) : (
-              <>
-                <div className="account">
-                  <b>{session.user.name}</b>
-                  <button onClick={logout}>Salir</button>
-                </div>
-                <button className="primary wide" disabled={busy} onClick={() => createOnline()}>
-                  <Plus size={17} /> Crear partida privada
-                </button>
-                <form
-                  className="join"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void createOnline(true);
+                <button
+                  onClick={() => {
+                    void storage.set('server', server);
+                    setNotice('Dirección guardada.');
                   }}
                 >
+                  Guardar dirección <Check size={15} />
+                </button>
+                <small>
+                  {!native && !server
+                    ? 'Vista web: servidor de esta misma dirección.'
+                    : 'Una misma dirección en ambos móviles.'}
+                </small>
+              </details>
+              {!session ? (
+                <form onSubmit={authenticate}>
+                  <div className="segmented">
+                    <button
+                      type="button"
+                      className={authMode === 'register' ? 'selected' : ''}
+                      onClick={() => setAuthMode('register')}
+                    >
+                      Crear cuenta
+                    </button>
+                    <button
+                      type="button"
+                      className={authMode === 'login' ? 'selected' : ''}
+                      onClick={() => setAuthMode('login')}
+                    >
+                      Entrar
+                    </button>
+                  </div>
                   <label>
-                    Código de invitación
+                    Nombre
                     <input
-                      placeholder="12 caracteres"
-                      maxLength={12}
-                      value={code}
-                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      autoComplete="username"
+                      required
+                      minLength={2}
+                      maxLength={24}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                  <button type="submit" disabled={busy || code.length !== 12}>
-                    Unirme <ArrowRight size={15} />
+                  <label>
+                    Contraseña
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      maxLength={128}
+                      autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </label>
+                  <button className="primary" disabled={busy}>
+                    {authMode === 'login' ? 'Entrar' : 'Crear cuenta'}
+                    <ArrowRight size={17} />
                   </button>
                 </form>
-                <button className="wide" disabled={busy} onClick={notifications}>
-                  <Bell size={17} /> Activar avisos de turno
-                </button>
-                <h3>Tus partidas</h3>
-                {games.length ? (
-                  games.map((g) => (
-                    <button
-                      className="game-row"
-                      key={g.id}
-                      disabled={g.archived}
-                      onClick={() => openGame(g.id)}
-                    >
-                      <span>
-                        <b>{g.opponent}</b>
-                        <small>
-                          {g.archived
-                            ? 'Archivo de reglas anteriores'
-                            : g.waiting
-                              ? 'Invitación abierta'
-                              : g.finished
-                                ? 'Terminada'
-                                : g.yourTurn
-                                  ? 'Tu turno'
-                                  : 'Turno rival'}{' '}
-                          · Ronda {g.round}
-                        </small>
-                      </span>
-                      <strong>{g.scores.join(' : ')}</strong>
-                      <ArrowRight size={16} />
+              ) : (
+                <>
+                  <div className="account">
+                    <b>{session.user.name}</b>
+                    <button onClick={logout}>Salir</button>
+                  </div>
+                  <button className="primary wide" disabled={busy} onClick={() => createOnline()}>
+                    <Plus size={17} /> Crear partida privada
+                  </button>
+                  <form
+                    className="join"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createOnline(true);
+                    }}
+                  >
+                    <label>
+                      Código de invitación
+                      <input
+                        placeholder="12 caracteres"
+                        maxLength={12}
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      />
+                    </label>
+                    <button type="submit" disabled={busy || code.length !== 12}>
+                      Unirme <ArrowRight size={15} />
                     </button>
-                  ))
-                ) : (
-                  <p className="muted">Aún no hay partidas online.</p>
-                )}
-              </>
-            )}
+                  </form>
+                  <button className="wide" disabled={busy} onClick={notifications}>
+                    <Bell size={17} /> Activar avisos de turno
+                  </button>
+                  <h3>Tus partidas</h3>
+                  {games.length ? (
+                    games.map((g) => (
+                      <button
+                        className="game-row"
+                        key={g.id}
+                        disabled={g.archived}
+                        onClick={() => openGame(g.id)}
+                      >
+                        <span>
+                          <b>{g.opponent}</b>
+                          <small>
+                            {g.archived
+                              ? 'Archivo de reglas anteriores'
+                              : g.waiting
+                                ? 'Invitación abierta'
+                                : g.finished
+                                  ? 'Terminada'
+                                  : g.yourTurn
+                                    ? 'Tu turno'
+                                    : 'Turno rival'}{' '}
+                            · Ronda {g.round}
+                          </small>
+                        </span>
+                        <strong>{g.scores.join(' : ')}</strong>
+                        <ArrowRight size={16} />
+                      </button>
+                    ))
+                  ) : (
+                    <p className="muted">Aún no hay partidas online.</p>
+                  )}
+                </>
+              )}
+            </details>
             {error ? (
               <p className="modal-error" role="alert">
                 {error}

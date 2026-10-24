@@ -4,7 +4,18 @@ Actualización web: ventas sin encaje y mazo de cinco efectos. Reglas 0.2.3 (oct
 
 Primera edición digital jugable para dos personas. Ciudad ilustrada, partidas privadas por turnos, entrenamiento contra IA y laboratorio de simulación dentro de la app.
 
-## Probar ahora
+## Jugar en el móvil (recomendado)
+
+Web instalable: **https://raul-s-c.github.io/barrio-en-venta/**
+
+1. Abre el enlace en Chrome para Android y elige **Instalar app** (o menú ⋮ → *Añadir a pantalla de inicio*). Queda como una app más, en vertical y sin barra del navegador. Funciona sin conexión.
+2. Menú de partidas (icono del globo) → **Por turnos**: escribe tu nombre y el de tu rival → *Nueva partida por turnos*.
+3. Juega tu turno, pulsa **Enviar a…** y mándale el enlace por WhatsApp. Cuando lo toque, se le abre la partida; juega cuando pueda y te devuelve otro enlace. No hace falta jugar del tirón, ni cuentas, ni servidor: la partida se guarda en cada móvil.
+4. Actualizaciones: cada cambio subido a `main` se publica solo (GitHub Actions → Pages). La app comprueba si hay versión nueva al abrirla, al volver a ella y cada 30 minutos; al abrirla se actualiza sola y, si estás jugando, muestra un aviso **Actualizar**.
+
+El enlace de turno contiene la semilla y la lista de jugadas, y cada móvil las vuelve a validar con el motor: no admite jugadas ilegales, pero quien quiera podría descifrar la mano rival. Es un juego entre personas de confianza.
+
+## Probar ahora (desarrollo)
 
 - Vista local: http://localhost:5178
 - APK de prueba: `deliverables/Barrio-en-Venta-0.2.1-debug.apk`.
