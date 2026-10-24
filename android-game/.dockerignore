@@ -1,0 +1,12 @@
+node_modules
+android
+data
+reports
+secrets
+.env
+*.log
+test-results
+playwright-report
+docs/art
+.git
+dist

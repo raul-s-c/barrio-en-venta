@@ -1,0 +1,17 @@
+# Generados o temporales
+tmp/
+outputs/
+resultados-simulacion/
+__pycache__/
+*.pyc
+
+# Herramientas locales
+.claude/
+.agents/
+
+# Artefactos de la app (se regeneran con los scripts del proyecto)
+android-game/deliverables/
+android-game/reports/
+*.apk
+*.aab
+*.log

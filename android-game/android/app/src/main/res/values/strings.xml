@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Barrio en Venta</string>
+    <string name="title_activity_main">Barrio en Venta</string>
+    <string name="package_name">es.barrioenventa.app</string>
+    <string name="custom_url_scheme">es.barrioenventa.app</string>
+</resources>
